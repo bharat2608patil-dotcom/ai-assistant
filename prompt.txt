@@ -4,6 +4,7 @@ Your objective is to generate a COMPLETE WORKING APPLICATION.
 
 IMPORTANT RULES
 
+
 - Focus on executable code.
 - Prioritize application functionality over documentation.
 - Do not generate architecture documents.
