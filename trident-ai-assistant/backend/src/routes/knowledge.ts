@@ -74,6 +74,52 @@ router.get('/api/knowledge', requireKnowledgeAuth, async (_request, response) =>
   }
 });
 
+router.get('/api/knowledge/content', requireKnowledgeAuth, async (request, response) => {
+  const requestedPath = typeof request.query.path === 'string' ? request.query.path : '';
+  if (!requestedPath || !['.md', '.txt'].includes(path.extname(requestedPath).toLowerCase())) {
+    response.status(400).json({ ok: false, message: 'Provide a Markdown or transcript text file path to view.' });
+    return;
+  }
+
+  const destination = path.resolve(knowledgeDirectory, requestedPath);
+  const relativePath = path.relative(knowledgeDirectory, destination);
+  if (!relativePath || relativePath === '..' || relativePath.startsWith(`..${path.sep}`) || path.isAbsolute(relativePath)) {
+    response.status(400).json({ ok: false, message: 'The requested path is outside the knowledge base.' });
+    return;
+  }
+
+  try {
+    const knowledgeRoot = await fs.realpath(knowledgeDirectory);
+    const actualPath = await fs.realpath(destination);
+    const actualRelativePath = path.relative(knowledgeRoot, actualPath);
+    if (!actualRelativePath || actualRelativePath === '..' || actualRelativePath.startsWith(`..${path.sep}`) || path.isAbsolute(actualRelativePath)) {
+      response.status(400).json({ ok: false, message: 'The requested path is outside the knowledge base.' });
+      return;
+    }
+
+    const stat = await fs.stat(actualPath);
+    if (!stat.isFile() || !['.md', '.txt'].includes(path.extname(actualPath).toLowerCase())) {
+      response.status(400).json({ ok: false, message: 'Only Markdown and transcript text files can be viewed.' });
+      return;
+    }
+
+    const content = new TextDecoder('utf-8', { fatal: true }).decode(await fs.readFile(actualPath));
+    response.json({ relativePath, content });
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      response.status(404).json({ ok: false, message: 'The knowledge file was not found.' });
+      return;
+    }
+    if (error instanceof TypeError) {
+      response.status(400).json({ ok: false, message: 'The knowledge file is not valid UTF-8 text.' });
+      return;
+    }
+
+    console.error('[knowledge] failed to read knowledge file:', error);
+    response.status(500).json({ ok: false, message: 'The knowledge file could not be read.' });
+  }
+});
+
 router.delete('/api/knowledge', requireKnowledgeAuth, async (request, response) => {
   const requestedPath = typeof request.query.path === 'string' ? request.query.path : '';
   if (!requestedPath || !['.md', '.txt'].includes(path.extname(requestedPath).toLowerCase())) {

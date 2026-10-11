@@ -118,6 +118,15 @@ export async function getKnowledgeFiles(): Promise<KnowledgeFile[]> {
   return data.files;
 }
 
+export async function getKnowledgeFileContent(relativePath: string): Promise<string> {
+  const response = await fetch(`/api/knowledge/content?path=${encodeURIComponent(relativePath)}`);
+  const data = await response.json() as { content?: string; message?: string };
+  if (!response.ok || typeof data.content !== 'string') {
+    throw new Error(data.message ?? 'Unable to read the knowledge file.');
+  }
+  return data.content;
+}
+
 export async function deleteKnowledgeFile(relativePath: string): Promise<void> {
   const response = await fetch(`/api/knowledge?path=${encodeURIComponent(relativePath)}`, {
     method: 'DELETE',

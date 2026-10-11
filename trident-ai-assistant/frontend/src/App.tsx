@@ -35,6 +35,7 @@ import {
   clearChatHistory,
   deleteKnowledgeFile,
   getKnowledgeAuthStatus,
+  getKnowledgeFileContent,
   getKnowledgeFiles,
   loadChatHistory,
   loginKnowledgeAdmin,
@@ -77,6 +78,10 @@ function App() {
   const [knowledgeFiles, setKnowledgeFiles] = useState<KnowledgeFile[]>([]);
   const [knowledgeFilesOpen, setKnowledgeFilesOpen] = useState(false);
   const [knowledgeSearch, setKnowledgeSearch] = useState('');
+  const [viewedKnowledgeFile, setViewedKnowledgeFile] = useState<KnowledgeFile | null>(null);
+  const [viewedKnowledgeContent, setViewedKnowledgeContent] = useState('');
+  const [viewingKnowledgeFile, setViewingKnowledgeFile] = useState(false);
+  const [knowledgeContentError, setKnowledgeContentError] = useState('');
   const [deletingFile, setDeletingFile] = useState('');
   const [authStatus, setAuthStatus] = useState<KnowledgeAuthStatus | null>(null);
   const [authStatusLoading, setAuthStatusLoading] = useState(true);
@@ -148,6 +153,20 @@ function App() {
   const refreshKnowledgeFiles = async () => {
     const files = await getKnowledgeFiles();
     setKnowledgeFiles(files);
+  };
+
+  const handleViewKnowledgeFile = async (file: KnowledgeFile) => {
+    setViewedKnowledgeFile(file);
+    setViewedKnowledgeContent('');
+    setKnowledgeContentError('');
+    setViewingKnowledgeFile(true);
+    try {
+      setViewedKnowledgeContent(await getKnowledgeFileContent(file.relativePath));
+    } catch (contentError) {
+      setKnowledgeContentError(contentError instanceof Error ? contentError.message : 'Unable to read the knowledge file.');
+    } finally {
+      setViewingKnowledgeFile(false);
+    }
   };
 
   const handleRefreshAuthStatus = async () => {
@@ -393,20 +412,21 @@ function App() {
       <CssBaseline />
       <Box
         sx={{
-          minHeight: '100vh',
+          height: '100dvh',
           display: 'flex',
           justifyContent: 'center',
           background: 'radial-gradient(circle at top, #132d3d, #07141c 55%)',
-          px: 2,
-          py: 3,
+          overflow: 'hidden',
+          px: { xs: 0, sm: 2 },
+          py: { xs: 0, sm: 2 },
         }}
       >
         <Card
           sx={{
             width: '100%',
             maxWidth: 1150,
-            height: { xs: '100dvh', sm: 'calc(100vh - 32px)' },
-            minHeight: 520,
+            height: '100%',
+            minHeight: 0,
             display: 'flex',
             flexDirection: 'column',
             bgcolor: 'rgba(9, 20, 28, 0.8)',
@@ -514,7 +534,9 @@ function App() {
           <Box
             sx={{
               flexGrow: 1,
+              minHeight: 0,
               overflowY: 'auto',
+              overscrollBehaviorY: 'contain',
               px: { xs: 1.5, md: 3 },
               py: 2,
               background: 'rgba(0,0,0,0.08)',
@@ -681,9 +703,23 @@ function App() {
                     sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1.5, py: 1.25 }}
                   >
                     <Box sx={{ minWidth: 0, flexGrow: 1 }}>
-                      <Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>
+                      <Button
+                        variant="text"
+                        color="inherit"
+                        size="small"
+                        onClick={() => void handleViewKnowledgeFile(file)}
+                        aria-label={`View ${file.relativePath}`}
+                        sx={{
+                          justifyContent: 'flex-start',
+                          minWidth: 0,
+                          p: 0,
+                          textAlign: 'left',
+                          textTransform: 'none',
+                          overflowWrap: 'anywhere',
+                        }}
+                      >
                         {file.relativePath}
-                      </Typography>
+                      </Button>
                       <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mt: 0.5 }}>
                         <Chip
                           label={file.fileType === 'md' ? 'Markdown · .md' : 'Plain text · .txt'}
@@ -718,6 +754,51 @@ function App() {
             <Button onClick={() => {
               setKnowledgeFilesOpen(false);
               setKnowledgeSearch('');
+            }}>Close</Button>
+          </DialogActions>
+        </Dialog>
+        <Dialog
+          open={Boolean(viewedKnowledgeFile)}
+          onClose={() => {
+            setViewedKnowledgeFile(null);
+            setViewedKnowledgeContent('');
+            setKnowledgeContentError('');
+          }}
+          fullWidth
+          maxWidth="md"
+          aria-labelledby="knowledge-content-title"
+          slotProps={{ paper: { sx: { bgcolor: 'background.paper', backgroundImage: 'none' } } }}
+        >
+          <DialogTitle id="knowledge-content-title" sx={{ overflowWrap: 'anywhere' }}>
+            {viewedKnowledgeFile?.relativePath}
+          </DialogTitle>
+          <DialogContent dividers sx={{ minHeight: 180 }}>
+            {viewingKnowledgeFile ? (
+              <Typography variant="body2" color="text.secondary">Loading file content…</Typography>
+            ) : knowledgeContentError ? (
+              <Alert severity="error">{knowledgeContentError}</Alert>
+            ) : (
+              <Box
+                component="pre"
+                sx={{
+                  m: 0,
+                  whiteSpace: 'pre-wrap',
+                  overflowWrap: 'anywhere',
+                  color: 'text.primary',
+                  fontFamily: 'monospace',
+                  fontSize: '0.875rem',
+                  lineHeight: 1.65,
+                }}
+              >
+                {viewedKnowledgeContent}
+              </Box>
+            )}
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => {
+              setViewedKnowledgeFile(null);
+              setViewedKnowledgeContent('');
+              setKnowledgeContentError('');
             }}>Close</Button>
           </DialogActions>
         </Dialog>
