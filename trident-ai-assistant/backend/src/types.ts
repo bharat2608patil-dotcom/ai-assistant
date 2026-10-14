@@ -42,6 +42,8 @@ export interface ClaudeRequest {
   userQuestion: string;
   context: string;
   references?: string[];
+  disableTools?: boolean;
+  allowFallback?: boolean;
 }
 
 export interface ClaudeResponse {

@@ -29,6 +29,19 @@ export async function sendChatQuestion(question: string): Promise<ChatResponse> 
   return data;
 }
 
+export async function diagnoseJenkinsLog(log: string, focus = ''): Promise<ChatResponse> {
+  const response = await fetch('/api/chat/diagnose-jenkins-log', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ log, focus }),
+  });
+  const data = await response.json() as ChatResponse & { ok?: boolean; message?: string };
+  if (!response.ok || data.ok === false || typeof data.answer !== 'string') {
+    throw new Error(data.message ?? 'Unable to diagnose the Jenkins log.');
+  }
+  return data;
+}
+
 export interface KnowledgeUploadResponse {
   fileName: string;
   sizeBytes: number;

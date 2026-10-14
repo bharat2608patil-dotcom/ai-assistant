@@ -167,15 +167,17 @@ export async function callClaude(commandPrompt: ClaudeRequest, timeoutMs = 60000
     console.warn(`[claude] could not save prompt file: ${message}`);
   }
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const claudeCommand = isWindows() ? 'claude.cmd' : 'claude';
     console.log(`[claude] starting CLI: ${claudeCommand}`);
     const cliInstruction = 'Answer the Trident support request supplied through stdin. Do not greet the user; follow its requested response format.';
     const projectRoot = path.resolve(__dirname, '../../../');
     console.log(`[claude] CLI working directory: ${projectRoot}`);
     console.log(`[claude] CLI instruction argument: ${cliInstruction}`);
+    const cliArguments = ['-p', cliInstruction];
+    if (commandPrompt.disableTools) cliArguments.push('--tools', '');
 
-    const child = spawn(claudeCommand, ['-p', cliInstruction], {
+    const child = spawn(claudeCommand, cliArguments, {
       cwd: projectRoot,
       env: process.env,
       shell: isWindows(),
@@ -184,9 +186,14 @@ export async function callClaude(commandPrompt: ClaudeRequest, timeoutMs = 60000
     child.stdin.end(prompt, 'utf8');
 
     const timer = setTimeout(() => {
-      console.warn(`[claude] timeout after ${timeoutMs}ms; using fallback response`);
+      console.warn(`[claude] timeout after ${timeoutMs}ms${commandPrompt.allowFallback === false ? '; failing request' : '; using fallback response'}`);
       console.log(`[claude] partial CLI stdout before timeout (${stdout.length} characters):`);
       console.log(`--- CLI STDOUT BEGIN ---\n${stdout}\n--- CLI STDOUT END ---`);
+      if (commandPrompt.allowFallback === false) {
+        child.kill('SIGTERM');
+        reject(new Error('Claude CLI timed out while analyzing the Jenkins log.'));
+        return;
+      }
       console.warn('[claude] response source: local fallback (CLI timed out)');
       child.kill('SIGTERM');
       resolve(buildFallbackClaudeResponse(commandPrompt.userQuestion, commandPrompt.context));
@@ -206,6 +213,10 @@ export async function callClaude(commandPrompt: ClaudeRequest, timeoutMs = 60000
     child.on('error', (error) => {
       clearTimeout(timer);
       console.error('[claude] failed to start CLI:', error.message);
+      if (commandPrompt.allowFallback === false) {
+        reject(new Error(`Claude CLI could not be started: ${error.message}`));
+        return;
+      }
       console.error('[claude] response source: local fallback (CLI failed to start)');
       resolve(buildFallbackClaudeResponse(commandPrompt.userQuestion, commandPrompt.context));
     });
@@ -219,6 +230,10 @@ export async function callClaude(commandPrompt: ClaudeRequest, timeoutMs = 60000
       if (code !== 0) {
         console.error(`[claude] CLI exited with code ${code}`);
         console.error(`[claude] stderr: ${stderr.trim() || 'no stderr output'}`);
+        if (commandPrompt.allowFallback === false) {
+          reject(new Error(`Claude CLI exited with code ${code} while analyzing the Jenkins log.`));
+          return;
+        }
         console.error('[claude] response source: local fallback (CLI exited unsuccessfully)');
         resolve(buildFallbackClaudeResponse(commandPrompt.userQuestion, commandPrompt.context));
         return;
@@ -227,6 +242,10 @@ export async function callClaude(commandPrompt: ClaudeRequest, timeoutMs = 60000
       const raw = stdout.trim();
       if (!raw) {
         console.warn('[claude] CLI returned empty output; using fallback');
+        if (commandPrompt.allowFallback === false) {
+          reject(new Error('Claude CLI returned an empty response while analyzing the Jenkins log.'));
+          return;
+        }
         console.warn('[claude] response source: local fallback (CLI stdout was empty)');
         resolve(buildFallbackClaudeResponse(commandPrompt.userQuestion, commandPrompt.context));
         return;

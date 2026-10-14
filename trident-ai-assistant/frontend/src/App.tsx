@@ -31,8 +31,10 @@ import ContentCopyOutlinedIcon from '@mui/icons-material/ContentCopyOutlined';
 import SearchOutlinedIcon from '@mui/icons-material/SearchOutlined';
 import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined';
 import CleaningServicesOutlinedIcon from '@mui/icons-material/CleaningServicesOutlined';
+import TroubleshootOutlinedIcon from '@mui/icons-material/TroubleshootOutlined';
 import {
   clearChatHistory,
+  diagnoseJenkinsLog,
   deleteKnowledgeFile,
   getKnowledgeAuthStatus,
   getKnowledgeFileContent,
@@ -100,6 +102,13 @@ function App() {
   const [clearChatBusy, setClearChatBusy] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [copiedMessageId, setCopiedMessageId] = useState('');
+  const [jenkinsLogDialogOpen, setJenkinsLogDialogOpen] = useState(false);
+  const [jenkinsLogText, setJenkinsLogText] = useState('');
+  const [jenkinsLogFileName, setJenkinsLogFileName] = useState('');
+  const [jenkinsLogFocus, setJenkinsLogFocus] = useState('');
+  const [jenkinsLogAnalyzing, setJenkinsLogAnalyzing] = useState(false);
+  const [jenkinsLogError, setJenkinsLogError] = useState('');
+  const [jenkinsLogResult, setJenkinsLogResult] = useState<ChatResponse | null>(null);
   const [uploadFeedback, setUploadFeedback] = useState<{
     severity: 'success' | 'error';
     message: string;
@@ -403,6 +412,63 @@ function App() {
     }
   };
 
+  const handleJenkinsLogFileSelected = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    if (!/\.(log|txt|out)$/i.test(file.name)) {
+      setJenkinsLogError('Choose a Jenkins log or plain-text file (.log, .txt, or .out).');
+      return;
+    }
+    if (file.size > 1_000_000) {
+      setJenkinsLogError('The selected log must be 1 MB or smaller.');
+      return;
+    }
+
+    try {
+      const text = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer());
+      setJenkinsLogText(text);
+      setJenkinsLogFileName(file.name);
+      setJenkinsLogResult(null);
+      setJenkinsLogError('');
+    } catch {
+      setJenkinsLogError('The selected log must be readable UTF-8 text.');
+    }
+  };
+
+  const handleAnalyzeJenkinsLog = async () => {
+    if (!jenkinsLogText.trim()) {
+      setJenkinsLogError('Paste or select a Jenkins console log first.');
+      return;
+    }
+    if (jenkinsLogText.length > 500_000) {
+      setJenkinsLogError('The log is too large. Provide no more than 500,000 characters.');
+      return;
+    }
+
+    setJenkinsLogAnalyzing(true);
+    setJenkinsLogError('');
+    setJenkinsLogResult(null);
+    try {
+      setJenkinsLogResult(await diagnoseJenkinsLog(jenkinsLogText, jenkinsLogFocus));
+    } catch (analysisError) {
+      setJenkinsLogError(analysisError instanceof Error ? analysisError.message : 'Unable to diagnose the Jenkins log.');
+    } finally {
+      setJenkinsLogAnalyzing(false);
+    }
+  };
+
+  const handleCloseJenkinsLogDialog = () => {
+    if (jenkinsLogAnalyzing) return;
+    setJenkinsLogDialogOpen(false);
+    setJenkinsLogText('');
+    setJenkinsLogFileName('');
+    setJenkinsLogFocus('');
+    setJenkinsLogResult(null);
+    setJenkinsLogError('');
+  };
+
   const filteredKnowledgeFiles = knowledgeFiles.filter((file) =>
     file.relativePath.toLowerCase().includes(knowledgeSearch.trim().toLowerCase()),
   );
@@ -513,6 +579,18 @@ function App() {
                   {authStatusLoading ? 'Checking access…' : authStatus?.configured ? 'Knowledge admin sign in' : 'Set up knowledge admin'}
                 </Button>
               )}
+              <Button
+                variant="outlined"
+                color="primary"
+                size="small"
+                startIcon={<TroubleshootOutlinedIcon />}
+                onClick={() => {
+                  setJenkinsLogError('');
+                  setJenkinsLogDialogOpen(true);
+                }}
+              >
+                Analyze Jenkins log
+              </Button>
               <Tooltip title="Clear saved chat history">
                 <span>
                   <Button
@@ -962,6 +1040,113 @@ function App() {
             <Button onClick={() => setClearChatOpen(false)} disabled={clearChatBusy}>Cancel</Button>
             <Button color="error" variant="contained" onClick={() => void handleClearChat()} disabled={clearChatBusy}>
               {clearChatBusy ? 'Clearing…' : 'Clear history'}
+            </Button>
+          </DialogActions>
+        </Dialog>
+        <Dialog
+          open={jenkinsLogDialogOpen}
+          onClose={handleCloseJenkinsLogDialog}
+          fullWidth
+          maxWidth="md"
+          aria-labelledby="jenkins-log-title"
+          slotProps={{ paper: { sx: { bgcolor: 'background.paper', backgroundImage: 'none' } } }}
+        >
+          <DialogTitle id="jenkins-log-title">Diagnose a Jenkins pipeline log</DialogTitle>
+          <DialogContent dividers>
+            <Stack spacing={2}>
+              <Typography variant="body2" color="text.secondary">
+                Paste console output or select a downloaded Jenkins log. The app extracts failure lines, redacts common secret patterns, and checks them against local Trident knowledge.
+              </Typography>
+              <Alert severity="warning">
+                Review logs before submitting: automatic secret redaction is not guaranteed to catch every sensitive value. Raw logs are not saved to chat history or uploaded as files; redacted excerpts are sent to the local Claude CLI and may appear in its prompt snapshot and backend logs.
+              </Alert>
+              <Button
+                component="label"
+                variant="outlined"
+                color="primary"
+                startIcon={<CloudUploadOutlinedIcon />}
+                disabled={jenkinsLogAnalyzing}
+                sx={{ alignSelf: 'flex-start' }}
+              >
+                {jenkinsLogFileName ? `Selected: ${jenkinsLogFileName}` : 'Choose log file'}
+                <input
+                  hidden
+                  type="file"
+                  accept=".log,.txt,.out,text/plain"
+                  onChange={(event) => void handleJenkinsLogFileSelected(event)}
+                />
+              </Button>
+              <TextField
+                fullWidth
+                multiline
+                minRows={8}
+                maxRows={14}
+                label="Jenkins console output"
+                placeholder="Paste the console output from the failed build here…"
+                value={jenkinsLogText}
+                onChange={(event) => {
+                  setJenkinsLogText(event.target.value);
+                  setJenkinsLogFileName('');
+                  setJenkinsLogResult(null);
+                }}
+                disabled={jenkinsLogAnalyzing}
+                helperText={`${jenkinsLogText.length.toLocaleString()} / 500,000 characters`}
+                slotProps={{ htmlInput: { maxLength: 500_000 } }}
+              />
+              <TextField
+                fullWidth
+                size="small"
+                label="Optional focus"
+                placeholder="For example: explain the failure in the Deploy stage"
+                value={jenkinsLogFocus}
+                onChange={(event) => setJenkinsLogFocus(event.target.value)}
+                disabled={jenkinsLogAnalyzing}
+                slotProps={{ htmlInput: { maxLength: 500 } }}
+              />
+              {jenkinsLogError && <Alert severity="error">{jenkinsLogError}</Alert>}
+              {jenkinsLogResult && (
+                <Box>
+                  <Typography variant="h6" sx={{ mb: 1 }}>Diagnosis</Typography>
+                  <Box
+                    sx={{
+                      p: 2,
+                      borderRadius: 2,
+                      bgcolor: 'rgba(0,0,0,0.24)',
+                      whiteSpace: 'pre-wrap',
+                      overflowWrap: 'anywhere',
+                      lineHeight: 1.65,
+                    }}
+                  >
+                    <Typography component="div" variant="body2" sx={{ whiteSpace: 'pre-wrap', lineHeight: 'inherit' }}>
+                      {jenkinsLogResult.answer}
+                    </Typography>
+                  </Box>
+                  {jenkinsLogResult.references.length > 0 && (
+                    <Box sx={{ mt: 1.5, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                      {jenkinsLogResult.references.map((reference, index) => (
+                        <Chip
+                          key={`${reference}-${index}`}
+                          label={reference}
+                          size="small"
+                          color={reference.startsWith('Jenkins console log') ? 'secondary' : 'primary'}
+                          variant="outlined"
+                        />
+                      ))}
+                    </Box>
+                  )}
+                </Box>
+              )}
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={handleCloseJenkinsLogDialog} disabled={jenkinsLogAnalyzing}>Close</Button>
+            <Button
+              variant="contained"
+              startIcon={<TroubleshootOutlinedIcon />}
+              onClick={() => void handleAnalyzeJenkinsLog()}
+              disabled={jenkinsLogAnalyzing || !jenkinsLogText.trim()}
+            >
+              {jenkinsLogAnalyzing ? 'Analyzing…' : 'Analyze log'}
             </Button>
           </DialogActions>
         </Dialog>

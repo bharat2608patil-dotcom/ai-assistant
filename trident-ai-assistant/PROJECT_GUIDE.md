@@ -25,9 +25,11 @@ trident-ai-assistant/
 |   `-- src/
 |       |-- server.ts
 |       |-- routes/chat.ts
+|       |-- routes/jenkinsLog.ts
 |       |-- routes/knowledge.ts
 |       |-- retrieval/retrievalService.ts
 |       |-- services/claudeService.ts
+|       |-- services/jenkinsLogAnalyzer.ts
 |       |-- services/knowledgeAuth.ts
 |       |-- storage/storage.ts
 |       `-- types.ts
@@ -59,6 +61,8 @@ Other folders under `backend/src` and `frontend/src` contain supporting modules,
 - `frontend/vite.config.ts`: Runs the frontend at port `5173` and proxies `/api` requests to the backend at `localhost:4000`.
 - `backend/src/server.ts`: Starts Express, enables JSON request parsing and CORS, and mounts the chat routes.
 - `backend/src/routes/chat.ts`: Validates the request, saves the query, runs retrieval, calls Claude, records messages, and returns the API response.
+- `backend/src/routes/jenkinsLog.ts`: Accepts user-supplied Jenkins log text, extracts redacted failure evidence, retrieves related local knowledge, and returns a diagnosis without adding the log to chat history.
+- `backend/src/services/jenkinsLogAnalyzer.ts`: Redacts common credential patterns and selects bounded, line-numbered failure excerpts from Jenkins output.
 - `backend/src/routes/knowledge.ts`: Lists, uploads, and deletes supported knowledge files without overwriting an existing file; these operations require a knowledge administrator session.
 - `backend/src/services/knowledgeAuth.ts`: Creates the first knowledge administrator and handles login, logout, password hashing, and knowledge-management sessions.
 - `backend/src/retrieval/retrievalService.ts`: Finds and ranks paragraphs from Markdown knowledge files.
@@ -112,6 +116,12 @@ Open `http://localhost:5173` in a browser. Keep both terminal processes running 
 ### Upload a Knowledge File
 
 Sign in to knowledge management (or create its administrator account on first use), select **Upload knowledge**, review the UTF-8 text preview, and confirm. The backend accepts Markdown (`.md`) and plain text (`.txt`) files up to 5 MB. It sanitizes the stored filename and returns a conflict response if a file with that name already exists; rename the upload to add it under another name. Uploaded files are saved under `knowledge/` and are eligible for retrieval on the next question.
+
+### Diagnose a Jenkins Log
+
+Choose **Analyze Jenkins log** and paste a downloaded Jenkins console log or select a UTF-8 `.log`, `.txt`, or `.out` file. No Jenkins API credentials or external integration are used. The app accepts at most 500,000 pasted characters; selected files are limited to 1 MB. It masks common secret patterns, extracts line-numbered failure excerpts with nearby context, searches the local knowledge base, and asks the existing local Claude Code CLI to diagnose the failure. It does not save the raw uploaded log to a file, chat history, or query history.
+
+Automatic redaction cannot guarantee detection of every secret. Review logs before submission. Redacted excerpts included in the Claude prompt may appear in `storage/claude-prompt.txt` and backend logs. The diagnosis cites the supplied log line ranges and any retrieved knowledge sources; when Claude CLI fails, the app reports an error instead of returning a generic fallback diagnosis.
 
 ### Build Checks
 
@@ -230,6 +240,10 @@ Successful response fields:
 - `timestamp`: Response timestamp.
 
 An empty question returns HTTP 400. An unexpected server error returns HTTP 500 with a message.
+
+### `POST /api/chat/diagnose-jenkins-log`
+
+Accepts JSON containing `log` (required, at most 500,000 characters) and optional `focus` (at most 500 characters). The backend redacts common secrets, extracts failure lines and surrounding context, retrieves relevant local knowledge, and returns the diagnosis and source references. Raw log input is not written to query or chat-history storage. No Jenkins API or database is used.
 
 ### `GET /api/chat/history?limit=100`
 
