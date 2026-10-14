@@ -175,7 +175,7 @@ export async function callClaude(commandPrompt: ClaudeRequest, timeoutMs = 60000
     console.log(`[claude] CLI working directory: ${projectRoot}`);
     console.log(`[claude] CLI instruction argument: ${cliInstruction}`);
     const cliArguments = ['-p', cliInstruction];
-    if (commandPrompt.disableTools) cliArguments.push('--tools', '');
+    if (commandPrompt.disableTools) cliArguments.push('--tools=');
 
     const child = spawn(claudeCommand, cliArguments, {
       cwd: projectRoot,
